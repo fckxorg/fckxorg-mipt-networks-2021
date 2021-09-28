@@ -20,7 +20,11 @@ class UDPBasedProtocol:
         return self.udp_socket.sendto(data, self.remote_addr)
 
     def recvfrom(self, n):
-        msg, addr = self.udp_socket.recvfrom(n)
+        msg = None
+        try:
+            msg, addr = self.udp_socket.recvfrom(n)
+        except:
+            pass
         return msg
 
 MYTCP_ACK = 1
@@ -52,7 +56,11 @@ class Package:
 
     def __bytes__(self):
         header = struct.pack("BQQ", self.type, self.ack, self.seq)
-        return header + self.data
+        return header + self.data if self.data else header
+
+    def __str__(self):
+        types = {MYTCP_ACK : "ACK", MYTCP_FIN : "FIN", MYTCP_MSG : "MSG"}
+        return "package {} ack: {} seq: {} data: {}".format(types[self.type], str(self.ack), str(self.seq), str(self.data) if self.data is not None else "None")
 
     @classmethod
     def __validate_header(cls, type, ack, seq):
@@ -86,32 +94,43 @@ class MyTCPProtocol(UDPBasedProtocol):
             package = Package(MYTCP_MSG, self.ack, self.seq, body)
             packages.append(package)
             data = data[UDP_PACKAGE_MAX_SIZE - MYTCP_HEADER_LEN:]
-
+        
+        self.seq += len(data) + MYTCP_HEADER_LEN
         package = Package(MYTCP_FIN, self.ack, self.seq, data)
         packages.append(package)
 
         return packages
 
     def __get_ack_package(self, package: Package) -> bool:
-        response = Package.from_bytes(self.recvfrom(MYTCP_HEADER_LEN))
-        return response.type == MYTCP_ACK and response.ack == package.seq
+        raw_response = self.recvfrom(MYTCP_HEADER_LEN)
+        if raw_response is None:
+            return False
+
+        response = Package.from_bytes(raw_response)
+        return response.type == MYTCP_ACK
     
     def __send_ack_package(self, package: Package):
+        seen = True
         if self.ack < package.seq:
             self.ack += len(bytes(package))
             self.seq += MYTCP_HEADER_LEN
+            seen = False
 
         ack_package = Package(MYTCP_ACK, self.ack, self.seq)
-        self.sendto(ack_package)
-         
+        print("sending " + str(package), end='...')
+        self.sendto(bytes(ack_package))
+        print(" sent")
+        
+        return seen
 
     def __handle_response_package(self, response: bytes) -> dict:
         package = Package.from_bytes(response)
 
-        if package.type != MYTCP_FIN and package.type != MYTCP_MSG:
-            return {'data' : None, 'final' : True}
-        
-        self.__send_ack_package(package)
+        if not (package.type == MYTCP_FIN or package.type == MYTCP_MSG):
+            return None
+       
+        if self.__send_ack_package(package) is True:
+            return None
           
         status = {'data' : package.data, 'final' : False}
         if package.type == MYTCP_FIN:
@@ -122,22 +141,46 @@ class MyTCPProtocol(UDPBasedProtocol):
         packages = self.__data_to_packages(data) 
         
         for package in packages:
+            print("sending " + str(package), end='...')
             self.sendto(bytes(package))
+            print(" sent, waiting for ack")
             while not self.__get_ack_package(package):
+                print("no ack, resending " + str(package), end='...')
                 self.sendto(bytes(package))
+                print(" sent, waiting for ack")
+
+        return len(data)
 
 
     def recv(self, n: int):
+        print("recieving package", end='...')
         response = self.recvfrom(MYTCP_HEADER_LEN + n)
+        while response is None:
+            print(" timed out")
+            print("recieving package", end='...')
+            response = self.recvfrom(MYTCP_HEADER_LEN + n)
+        print("recieved, handling")
+
+
         result = self.__handle_response_package(response)
+        print("Package handled")
         
-        data = ''
-        data += str(result['data'])
+        data = None
+        if result is not None:
+            print(result)
+            data = b''
+            data += result['data']
 
         while not result['final']:
+            print("Recieving package")
             response = self.recvfrom(MYTCP_HEADER_LEN + n)
-            result = self.__handle_response_package(response)
-            data += str(result['data'])
-
+            while response is None:
+                response = self.recvfrom(MYTCP_HEADER_LEN + n)
+            print("Package recieved. Starting handle...")
+            if result is not None:
+                result = self.__handle_response_package(response)
+                data += str(result['data'])
+                print("Package handled")
+        print("stopping recieve")
         return data
 
