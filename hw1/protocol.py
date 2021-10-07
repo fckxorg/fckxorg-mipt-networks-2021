@@ -8,7 +8,7 @@ import multiprocessing
 class UDPBasedProtocol:
     def __init__(self, *, local_addr, remote_addr, send_loss=0.0):
         self.udp_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        self.udp_socket.settimeout(0.0001)
+        self.udp_socket.settimeout(0.001)
         self.remote_addr = remote_addr
         self.udp_socket.bind(local_addr)
         self.send_loss = send_loss
@@ -34,7 +34,7 @@ MYTCP_MSG = 2
 MYTCP_FIN = 4
 
 MYTCP_HEADER_LEN = len(struct.pack("BQQ", 0, 0, 0))
-UDP_PACKAGE_MAX_SIZE = 512
+UDP_PACKAGE_MAX_SIZE = MYTCP_HEADER_LEN + 10_000_000
 ASSURANCE_LIMIT = 3
 
 """
@@ -161,24 +161,19 @@ class MyTCPProtocol(UDPBasedProtocol):
             self.sendto(bytes(package))
             while not self.__get_ack_package(package):
                 self.sendto(bytes(package))
-       
-        fin = self.__finalize()
-        while not self.__get_ack_package(fin):
-            self.sendto(bytes(fin))
 
         return len(data)
 
     def recv(self, n: int):
         data = b''
         package = Package(MYTCP_DEF, 0, 0)
+        
+        recieved = 0
 
-        result, package = self.__recv_package(n)
-        while not package.type == MYTCP_FIN:
-            data += result
-            self.__send_ack_package(package)
+        while recieved != n:
             result, package = self.__recv_package(n)
-       
-        for _ in range(1):
+            recieved += len(result)
+            data += result
             self.__send_ack_package(package)
 
         return data
