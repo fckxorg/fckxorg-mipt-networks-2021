@@ -130,6 +130,7 @@ class MyTCPProtocol(UDPBasedProtocol):
         if self.state == RECV_STATE:
             response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
             while response is None:
+                # Logger.log('No package, waiting') # Оба сокета могут сесть в recv и произойдет инсульт
                 response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
             package = Package.from_bytes(response)
 
@@ -140,15 +141,20 @@ class MyTCPProtocol(UDPBasedProtocol):
                     return package.data
                 return b''
             else:
-                raise ValueError
+                return b''
+
         elif self.state == SEND_STATE:
             response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
             if response is None:
                 return 'None'
             package = Package.from_bytes(response)
             if package.type == MYTCP_MSG:
-                self.state = RECV_STATE
-                return 'Recv'
+                if package.uid in self.rack:
+                    self.__send_ack_package(package)
+                    return 'None'
+                else:
+                    self.state = RECV_STATE
+                    return 'Recv'
             elif package.type == MYTCP_ACK:
                 if package.uid not in self.sseq:
                     raise ValueError
@@ -168,11 +174,12 @@ class MyTCPProtocol(UDPBasedProtocol):
         
         for package in packages:
             self.__send_package(package)
-            # Logger.log('Sent ' + str(package))
+            Logger.log('Sent ' + str(package))
 
             response = self.__handle_package(MYTCP_HEADER_LEN)
             while response == 'None':
                 self.__resend_package(package)
+                Logger.log('Resent ' + str(package))
                 response = self.__handle_package(MYTCP_HEADER_LEN)
             if response == 'Recv':
                 break
@@ -188,6 +195,6 @@ class MyTCPProtocol(UDPBasedProtocol):
             result = self.__handle_package(UDP_PACKAGE_MAX_SIZE)
             recieved += len(result)
             data += result
-
+        Logger.log('Collected ' + str(data))
         return data
 
