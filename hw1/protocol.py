@@ -3,14 +3,14 @@ import socket
 import struct
 import math
 from time import sleep
-import multiprocessing
+import threading
 
 class Logger:
     log_file = 'log.txt'
     @classmethod
     def log(cls, msg):
         with open(cls.log_file, 'a') as f:
-            f.write(msg + '\n')
+            f.write('In thread: ' + str(threading.get_ident()) + ' ' + msg + '\n')
 
 class UDPBasedProtocol:
     def __init__(self, *, local_addr, remote_addr, send_loss=0.0):
@@ -39,6 +39,13 @@ MYTCP_DEF = 0
 MYTCP_ACK = 1
 MYTCP_MSG = 2
 MYTCP_FIN = 4
+
+ACK_CONT = 0
+ACK_STOP = 1
+ACK_SUCC = 2
+
+SEND_STATE = 0
+RECV_STATE = 1
 
 MYTCP_HEADER_LEN = len(struct.pack("BQ", 0, 0))
 UDP_PACKAGE_MAX_SIZE = MYTCP_HEADER_LEN + 512
@@ -98,6 +105,7 @@ class MyTCPProtocol(UDPBasedProtocol):
         self.sseq = set()
         self.rack = set()
         self.uid = 0
+        self.state = SEND_STATE
 
     def __data_to_packages(self, data: bytes) -> list[Package]:
         packages = []
@@ -114,36 +122,42 @@ class MyTCPProtocol(UDPBasedProtocol):
 
         return packages
 
-    def __get_ack_package(self, package: Package) -> bool:
-        raw_response = self.recvfrom(MYTCP_HEADER_LEN)
-        if raw_response is None:
-            return False
-        response = Package.from_bytes(raw_response)
-        if response.type != MYTCP_ACK:
-            return False
-        
-        if response.uid not in self.sseq:
-            return None
-
-        self.sack.add(response.uid)
-        return True
-
-    
     def __send_ack_package(self, package: Package):
-        ack_package = Package(MYTCP_ACK, package.uid, 0)
+        ack_package = Package(MYTCP_ACK, package.uid)
         self.sendto(bytes(ack_package))
         Logger.log("Sent ack " + str(ack_package) + " for " + str(package))
 
           
-    def __recv_package(self, n: int) -> tuple[bytes, Package]:
-        response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
-        while response is None:
+    def __handle_package(self, n: int) -> str:
+        if self.state == RECV_STATE:
             response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
-        package = Package.from_bytes(response)
+            while response is None:
+                response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
+            package = Package.from_bytes(response)
 
-        if package.uid not in self.rack:
-            self.rack.add(package.uid)  
-            return package.data if package.data is not None else b'', package
+            if package.type == MYTCP_MSG:
+                self.__send_ack_package(package)
+                if package.uid not in self.rack:
+                    self.rack.add(package.uid)
+                    return package.data
+                return b''
+            else:
+                raise ValueError
+        elif self.state == SEND_STATE:
+            response = self.recvfrom(UDP_PACKAGE_MAX_SIZE)
+            if response is None:
+                return 'None'
+            package = Package.from_bytes(response)
+            if package.type == MYTCP_MSG:
+                self.state = RECV_STATE
+                return 'Recv'
+            elif package.type == MYTCP_ACK:
+                if package.uid not in self.sseq:
+                    raise ValueError
+                self.sack.add(package.uid)
+                return 'True'
+
+
         
         return b'', package
     
@@ -155,30 +169,30 @@ class MyTCPProtocol(UDPBasedProtocol):
         self.sendto(bytes(package))
         
     def send(self, data: bytes):
+        self.state = SEND_STATE
         packages = self.__data_to_packages(data) 
         
         for package in packages:
             self.__send_package(package)
             Logger.log('Sent ' + str(package))
-            while not self.__get_ack_package(package):
-                Logger.log('No ack for ' + str(package))
+
+            response = self.__handle_package(MYTCP_HEADER_LEN)
+            while response == 'None':
                 self.__resend_package(package)
-                Logger.log('Resent ' + str(package))
-            Logger.log('Ack ' + str(package))
+            if response == 'Recv':
+                break
 
         return len(data)
 
     def recv(self, n: int):
+        self.state = RECV_STATE
         data = b''
-        package = Package(MYTCP_DEF, 0)
-        
         recieved = 0
 
         while recieved != n:
-            result, package = self.__recv_package(n)
+            result = self.__handle_package(UDP_PACKAGE_MAX_SIZE)
             recieved += len(result)
             data += result
-            self.__send_ack_package(package)
 
         return data
 
