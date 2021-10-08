@@ -5,6 +5,13 @@ import math
 from time import sleep
 import multiprocessing
 
+class Logger:
+    log_file = 'log.txt'
+    @classmethod
+    def log(cls, msg):
+        with open(cls.log_file, 'a') as f:
+            f.write(msg + '\n')
+
 class UDPBasedProtocol:
     def __init__(self, *, local_addr, remote_addr, send_loss=0.0):
         self.udp_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
@@ -126,6 +133,7 @@ class MyTCPProtocol(UDPBasedProtocol):
         self.rseq += len(ack_package)
         ack_package.seq = self.rseq
         self.sendto(bytes(ack_package))
+        # Logger.log("Sent ack " + str(ack_package) + " for " + str(package))
 
     def __parse_response(self, response: bytes) -> tuple[bytes, Package]:
         package = Package.from_bytes(response)
@@ -143,17 +151,22 @@ class MyTCPProtocol(UDPBasedProtocol):
 
         result, package = self.__parse_response(response)
         return result, package
+    
+    def __send_package(self, package: Package):
+        package.ack = self.sack
+        self.sseq += len(package)
+        package.seq = self.sseq
+        self.sendto(bytes(package))
+    def __resend_package(self, package: Package):
+        self.sendto(bytes(package))
         
     def send(self, data: bytes):
         packages = self.__data_to_packages(data) 
         
         for package in packages:
-            package.ack = self.sack
-            self.sseq += len(package)
-            package.seq = self.sseq
-            self.sendto(bytes(package))
+            self.__send_package(package)
             while not self.__get_ack_package(package):
-                self.sendto(bytes(package))
+                self.__resend_package(package)
 
         return len(data)
 
