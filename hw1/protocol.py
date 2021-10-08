@@ -9,8 +9,8 @@ class Logger:
     log_file = 'log.txt'
     @classmethod
     def log(cls, msg):
-        with open(cls.log_file, 'a') as f:
-            f.write('In thread: ' + str(threading.get_ident()) + ' ' + msg + '\n')
+        #with open(cls.log_file, 'a') as f:
+        print('In thread: ' + str(threading.get_ident()) + ' ' + msg + '\n')
 
 class UDPBasedProtocol:
     def __init__(self, *, local_addr, remote_addr, send_loss=0.0):
@@ -48,7 +48,7 @@ SEND_STATE = 0
 RECV_STATE = 1
 
 MYTCP_HEADER_LEN = len(struct.pack("BQ", 0, 0))
-UDP_PACKAGE_MAX_SIZE = MYTCP_HEADER_LEN + 512
+UDP_PACKAGE_MAX_SIZE = MYTCP_HEADER_LEN + 60000
 ASSURANCE_LIMIT = 3
 
 """
@@ -195,6 +195,7 @@ class MyTCPProtocol(UDPBasedProtocol):
             result = self.__handle_package(UDP_PACKAGE_MAX_SIZE)
             recieved += len(result)
             data += result
+            Logger.log('Recieved ' + str(recieved))
         Logger.log('Collected ' + str(data))
         return data
 
