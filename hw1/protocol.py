@@ -125,8 +125,6 @@ class MyTCPProtocol(UDPBasedProtocol):
     def __send_ack_package(self, package: Package):
         ack_package = Package(MYTCP_ACK, package.uid)
         self.sendto(bytes(ack_package))
-        Logger.log("Sent ack " + str(ack_package) + " for " + str(package))
-
           
     def __handle_package(self, n: int) -> str:
         if self.state == RECV_STATE:
@@ -156,10 +154,6 @@ class MyTCPProtocol(UDPBasedProtocol):
                     raise ValueError
                 self.sack.add(package.uid)
                 return 'True'
-
-
-        
-        return b'', package
     
     def __send_package(self, package: Package):
         self.sseq.add(package.uid)
@@ -174,11 +168,12 @@ class MyTCPProtocol(UDPBasedProtocol):
         
         for package in packages:
             self.__send_package(package)
-            Logger.log('Sent ' + str(package))
+            # Logger.log('Sent ' + str(package))
 
             response = self.__handle_package(MYTCP_HEADER_LEN)
             while response == 'None':
                 self.__resend_package(package)
+                response = self.__handle_package(MYTCP_HEADER_LEN)
             if response == 'Recv':
                 break
 
