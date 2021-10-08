@@ -88,9 +88,11 @@ class Package:
 class MyTCPProtocol(UDPBasedProtocol):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ack = 0
-        self.seq = 0
-    
+        self.sack = 0
+        self.sseq = 0
+        self.rack = 0
+        self.rseq = 0
+
     def __data_to_packages(self, data: bytes) -> list[Package]:
         packages = []
         while len(data) + MYTCP_HEADER_LEN > UDP_PACKAGE_MAX_SIZE:
@@ -112,24 +114,24 @@ class MyTCPProtocol(UDPBasedProtocol):
         if response.type != MYTCP_ACK:
             return False
         
-        if response.ack != self.seq:
+        if response.ack != self.sseq:
             return None
 
-        self.ack += len(raw_response)
+        self.sack += len(raw_response)
         return True
 
     
     def __send_ack_package(self, package: Package):
-        ack_package = Package(MYTCP_ACK, self.ack, 0)
-        self.seq += len(ack_package)
-        ack_package.seq = self.seq
+        ack_package = Package(MYTCP_ACK, self.rack, 0)
+        self.rseq += len(ack_package)
+        ack_package.seq = self.rseq
         self.sendto(bytes(ack_package))
 
     def __parse_response(self, response: bytes) -> tuple[bytes, Package]:
         package = Package.from_bytes(response)
        
-        if self.ack < package.seq:
-            self.ack += len(response)  
+        if self.rack < package.seq:
+            self.rack += len(response)  
             return package.data if package.data is not None else b'', package
           
         return b'', package
@@ -142,22 +144,13 @@ class MyTCPProtocol(UDPBasedProtocol):
         result, package = self.__parse_response(response)
         return result, package
         
-    
-    def __finalize(self) -> Package:
-        fin = Package(MYTCP_FIN, self.ack, 0)
-        self.seq += len(fin)
-        fin.seq = self.seq
-        self.sendto(bytes(fin))
-        return fin
-
-
     def send(self, data: bytes):
         packages = self.__data_to_packages(data) 
         
         for package in packages:
-            package.ack = self.ack
-            self.seq += len(package)
-            package.seq = self.seq
+            package.ack = self.sack
+            self.sseq += len(package)
+            package.seq = self.sseq
             self.sendto(bytes(package))
             while not self.__get_ack_package(package):
                 self.sendto(bytes(package))
