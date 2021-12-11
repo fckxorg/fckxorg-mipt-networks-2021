@@ -1,18 +1,16 @@
 #include <arpa/inet.h>
-#include <asm-generic/errno-base.h>
-#include <errno.h>        //For errno - the error number
-#include <netinet/in.h>   //Provides declarations for ip header
-#include <netinet/ip.h>   //Provides declarations for ip header
-#include <netinet/tcp.h>  //Provides declarations for tcp header
+#include <errno.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
-#include <stdlib.h>  //for exit(0);
-#include <string.h>  //memset
+#include <stdlib.h>
 #include <sys/socket.h>
-
 #include <cstdint>
+#include <cstring>
 #include <string>
 
-struct pseudo_header  // needed for checksum calculation
+struct pseudo_header
 {
   unsigned int source_address;
   unsigned int dest_address;
